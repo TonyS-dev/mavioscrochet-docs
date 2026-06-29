@@ -91,6 +91,22 @@ El test original generaba el **mismo destino (Código Postal)** para los 500 Usu
 
 ---
 
+## Ronda 4: Chaos Engineering & Anti-Fragilidad (El Patrón Bulkhead)
+
+Para probar la resiliencia de la arquitectura bajo condiciones extremas de falla, degradamos intencionalmente el mock de la API externa de Envía, forzando un severo **retraso de 3 segundos por petición**.
+
+Cuando una integración de terceros tarda tanto en responder, las arquitecturas tradicionales sufren una falla en cascada (el backend se cuelga, la RAM se llena, y los usuarios ven errores HTTP 500). Sin embargo, nuestra combinación de `@Bulkhead(value = 50, waitingTaskQueue = 100)` y `@Fallback` realizó una maniobra de control de daños perfecta:
+
+- Los primeros 50 usuarios concurrentes entraron al sistema y esperaron los 3 segundos para las tarifas reales.
+- Los siguientes 100 usuarios se encolaron en la cola de tareas de espera.
+- **Los 350 usuarios restantes fueron rechazados instantáneamente (rebotaron en el límite del Bulkhead).**
+
+En lugar de colapsar o cortar las conexiones, Quarkus atrapó la `BulkheadException` y ruteó instantáneamente el tráfico excedente al método de contingencia `@Fallback`, entregando una tarifa plana de emergencia preconfigurada en **~5.4 milisegundos**.
+
+**Resultado:** De las 40,720 peticiones inyectadas en 3 minutos, fallaron el **0.00%**. El sistema garantizó que el 90% de los usuarios desbordados recibieran una tarifa de envío de respaldo instantánea, permitiéndoles terminar su compra de inmediato. El sistema protegió con éxito al backend del agotamiento de memoria y preservó las cuotas de la API externa.
+
+---
+
 ## Ronda Final: Virtual Threads vs Blocking Threads (Sin Caché)
 
 Para comprobar el verdadero valor arquitectónico de Java 21, se diseñó un ataque final de 500 Usuarios Concurrentes donde el script de `k6` generaba un **código postal aleatorio en cada petición**, derrotando por completo la caché de Redis. Esto obligó al servidor a realizar el Bin Packing 3D y abrir 6 conexiones HTTP externas por cada solicitud.

@@ -91,6 +91,22 @@ The original test generated the **same destination (Postal Code)** for the 500 C
 
 ---
 
+## Round 4: Chaos Engineering & Anti-Fragility (The Bulkhead Pattern)
+
+To test the resilience of the architecture under extreme failure conditions, we intentionally degraded the mock of the external Envía API, forcing a severe **3-second delay per request**. 
+
+When a 3rd-party integration takes this long to respond, traditional architectures suffer from cascading failure (the backend hangs, RAM fills up, and users see HTTP 500 errors). However, our combination of `@Bulkhead(value = 50, waitingTaskQueue = 100)` and `@Fallback` performed a perfect damage-control maneuver:
+
+- The first 50 concurrent users entered the system and waited the 3 seconds for the real rates.
+- The next 100 users queued up in the waiting task queue.
+- **The remaining 350 users were rejected instantly (bounced off the Bulkhead limit).**
+
+Instead of crashing or dropping connections, Quarkus caught the `BulkheadException` and instantly routed the overflowing traffic to the `@Fallback` contingency method, delivering a pre-configured emergency flat rate in **~5.4 milliseconds**. 
+
+**Result:** Out of 40,720 requests injected over 3 minutes, **0.00% failed**. The system guaranteed that 90% of the overflowing users received an instant fallback shipping quote, allowing them to finish their checkout immediately. The system successfully protected the backend from memory exhaustion and preserved external API quotas.
+
+---
+
 ## Final Round: Virtual Threads vs Blocking Threads (Without Cache)
 
 To verify the true architectural value of Java 21, a final attack of 500 Concurrent Users was designed where the `k6` script generated a **random postal code in each request**, completely defeating the Redis cache. This forced the server to perform 3D Bin Packing and open 6 external HTTP connections per request.
